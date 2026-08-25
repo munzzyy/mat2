@@ -32,7 +32,7 @@ class AbstractFFmpegParser(exiftool.ExiftoolParser):
                '-flags:a', '+bitexact',  # don't add any metadata
                self.output_filename]
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
         except subprocess.CalledProcessError as e:
             logging.error("Something went wrong during the processing of %s: return code %d", self.filename, e.returncode)
             return False
