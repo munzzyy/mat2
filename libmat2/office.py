@@ -594,7 +594,7 @@ class MSOfficeParser(ZipParser):
             return False
 
         if _OOXML_POWERPOINT_2010_NS not in namespace.values():
-            return True  # pragma: no cover
+            return True
 
         creation_id_tag = '{%s}creationId' % _OOXML_POWERPOINT_2010_NS
         for item in tree.iter():
@@ -612,7 +612,7 @@ class MSOfficeParser(ZipParser):
             return False
 
         if _OOXML_PRESENTATION_NS not in namespace.values():
-            return True  # pragma: no cover
+            return True
 
         sld_master_id_tag = '{%s}sldMasterId' % _OOXML_PRESENTATION_NS
         for item in tree.iter():

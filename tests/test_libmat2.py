@@ -338,6 +338,67 @@ class TestRevisionsCleaning(unittest.TestCase):
             self.assertNotIn(b'Reviewer', content)
             self.assertNotIn(b'rPrChange', content)
 
+    def test_msoffice_randomize_creationId(self):
+        # A non-`p14` prefix on the powerpoint/2010 namespace to make sure the
+        # element is matched by its namespace URI, not the prefix convention.
+        with tempfile.NamedTemporaryFile(suffix='.xml') as xml_file:
+            xml_file.write(b'''<?xml version="1.0"?>
+                <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+                                xmlns:foo="http://schemas.microsoft.com/office/powerpoint/2010/main">
+                    <foo:creationId val="123456789"/>
+                </p:presentation>''')
+            xml_file.flush()
+
+            self.assertTrue(office.MSOfficeParser._MSOfficeParser__randomize_creationId(
+                xml_file.name))
+
+            with open(xml_file.name, 'rb') as cleaned:
+                content = cleaned.read()
+            self.assertIn(b'creationId', content)
+            self.assertNotIn(b'123456789', content)
+
+    def test_msoffice_randomize_creationId_without_namespace(self):
+        # No powerpoint/2010 namespace: the method must be a no-op success.
+        with tempfile.NamedTemporaryFile(suffix='.xml') as xml_file:
+            xml_file.write(b'<?xml version="1.0"?><root><creationId val="1"/></root>')
+            xml_file.flush()
+
+            self.assertTrue(office.MSOfficeParser._MSOfficeParser__randomize_creationId(
+                xml_file.name))
+
+            with open(xml_file.name, 'rb') as cleaned:
+                self.assertIn(b'val="1"', cleaned.read())
+
+    def test_msoffice_randomize_sldMasterId(self):
+        # A non-`p` prefix on the presentationml namespace to make sure the
+        # element is matched by its namespace URI, not the prefix convention.
+        with tempfile.NamedTemporaryFile(suffix='.xml') as xml_file:
+            xml_file.write(b'''<?xml version="1.0"?>
+                <bar:presentation xmlns:bar="http://schemas.openxmlformats.org/presentationml/2006/main">
+                    <bar:sldMasterIdLst><bar:sldMasterId id="2147483648"/></bar:sldMasterIdLst>
+                </bar:presentation>''')
+            xml_file.flush()
+
+            self.assertTrue(office.MSOfficeParser._MSOfficeParser__randomize_sldMasterId(
+                xml_file.name))
+
+            with open(xml_file.name, 'rb') as cleaned:
+                content = cleaned.read()
+            self.assertIn(b'sldMasterId', content)
+            self.assertNotIn(b'2147483648', content)
+
+    def test_msoffice_randomize_sldMasterId_without_namespace(self):
+        # No presentationml namespace: the method must be a no-op success.
+        with tempfile.NamedTemporaryFile(suffix='.xml') as xml_file:
+            xml_file.write(b'<?xml version="1.0"?><root><sldMasterId id="1"/></root>')
+            xml_file.flush()
+
+            self.assertTrue(office.MSOfficeParser._MSOfficeParser__randomize_sldMasterId(
+                xml_file.name))
+
+            with open(xml_file.name, 'rb') as cleaned:
+                self.assertIn(b'id="1"', cleaned.read())
+
     def test_libreoffice(self):
         with zipfile.ZipFile('./tests/data/revision.odt') as zipin:
             c = zipin.open('content.xml')
