@@ -231,10 +231,21 @@ class MSOfficeParser(ZipParser):
         for c in tree:
             if 'PartName' not in c.attrib or 'ContentType' not in c.attrib:  # pragma: no cover
                 continue
-            elif c.attrib['ContentType'] in self.content_types_to_keep:
-                fname = c.attrib['PartName'][1:]  # remove leading `/`
-                re_fname = re.compile('^' + re.escape(fname) + '$')
-                self.files_to_keep.add(re_fname)  # type: ignore
+            partname = c.attrib['PartName']
+            # A conformant PartName is absolute, but crafted files might not be.
+            if partname.startswith('/'):
+                partname = partname[1:]
+            content_type = c.attrib['ContentType']
+            self.content_types[partname] = content_type
+            if content_type not in self.content_types_to_keep:
+                continue
+            # A document-chosen PartName must not resurrect a part we
+            # explicitly omit (e.g. people.xml or docProps/custom.xml relabelled
+            # with a kept content type), so let the omit list win here.
+            if any(o.search(partname) for o in self.files_to_omit):
+                continue
+            re_fname = re.compile('^' + re.escape(partname) + '$')
+            self.files_to_keep.add(re_fname)  # type: ignore
         return True
 
     @staticmethod
@@ -559,7 +570,10 @@ class MSOfficeParser(ZipParser):
 
         root = tree.getroot()
         for item in root.findall('{%s}Override' % namespace['']):
-            name = item.attrib['PartName'][1:]  # remove the leading '/'
+            name = item.attrib['PartName']
+            # A conformant PartName is absolute, but crafted files might not be.
+            if name.startswith('/'):
+                name = name[1:]
             if name in members_to_remove:
                 root.remove(item)
 
@@ -626,7 +640,7 @@ class MSOfficeParser(ZipParser):
         if os.stat(full_path).st_size == 0:  # Don't process empty files
             return True
 
-        if not full_path.endswith(('.xml', '.rels')):
+        if not full_path.lower().endswith(('.xml', '.rels')):
             return True
 
         if self.__randomize_creationId(full_path) is False:
@@ -639,11 +653,33 @@ class MSOfficeParser(ZipParser):
             if self.__remove_dead_rel_references(full_path, member_name) is False:  # pragma: no cover
                 return False
 
+        # The core/extended-properties parts carry document metadata; a crafted
+        # [Content_Types].xml can point those content types at a non-canonical
+        # PartName to dodge the path checks below, so match on the content type
+        # first, keeping the canonical path as a fallback.
+        content_type = self.content_types.get(member_name, '')
+        core_properties = 'application/vnd.openxmlformats-package.core-properties+xml'
+        extended_properties = 'application/vnd.openxmlformats-officedocument.extended-properties+xml'
+
         if full_path.endswith('/[Content_Types].xml'):
             # this file contains references to files that we might
             # remove, and MS Office doesn't like dangling references
             if self.__remove_content_type_members(full_path) is False:  # pragma: no cover
                 return False
+        elif content_type == extended_properties or full_path.endswith('/docProps/app.xml'):
+            # This file must be present and valid,
+            # so we're removing as much as we can.
+            with open(full_path, 'wb') as f:
+                f.write(b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
+                f.write(b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">')
+                f.write(b'</Properties>')
+        elif content_type == core_properties or full_path.endswith('/docProps/core.xml'):
+            # This file must be present and valid,
+            # so we're removing as much as we can.
+            with open(full_path, 'wb') as f:
+                f.write(b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
+                f.write(b'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">')
+                f.write(b'</cp:coreProperties>')
         elif member_name.startswith('word/') and member_name.endswith('.xml'):
             # Revisions and comment anchors can occur in the document, notes,
             # headers and footers.
@@ -655,21 +691,6 @@ class MSOfficeParser(ZipParser):
             # similar to the above, but for the relationship files
             if self.__remove_rels_members(full_path, member_name) is False:  # pragma: no cover
                 return False
-
-        elif full_path.endswith('/docProps/app.xml'):
-            # This file must be present and valid,
-            # so we're removing as much as we can.
-            with open(full_path, 'wb') as f:
-                f.write(b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
-                f.write(b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">')
-                f.write(b'</Properties>')
-        elif full_path.endswith('/docProps/core.xml'):
-            # This file must be present and valid,
-            # so we're removing as much as we can.
-            with open(full_path, 'wb') as f:
-                f.write(b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
-                f.write(b'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">')
-                f.write(b'</cp:coreProperties>')
         elif full_path.endswith('/ppt/tableStyles.xml'):  # pragma: no cover
             # This file must be present and valid,
             # so we're removing as much as we can.
