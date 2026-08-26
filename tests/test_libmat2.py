@@ -106,6 +106,9 @@ class TestGetMeta(unittest.TestCase):
         p = torrent.TorrentParser('./tests/data/dirty.torrent')
         meta = p.get_meta()
         self.assertEqual(meta['created by'], b'mktorrent 1.0')
+        # the tracker URL is kept, but must be reported since it can embed a
+        # private-tracker passkey
+        self.assertEqual(meta['announce'], b'udp://tracker.torrent.eu.org:451')
 
     def test_png(self):
         p = images.PNGParser('./tests/data/dirty.png')
@@ -750,7 +753,11 @@ class TestCleaning(unittest.TestCase):
             'name': 'torrent',
             'parser': torrent.TorrentParser,
             'meta': {'created by': b'mktorrent 1.0', 'creation date': 1522397702},
-            'expected_meta': {},
+            'expected_meta': {
+                'announce': b'udp://tracker.torrent.eu.org:451',
+                'announce-list': [[b'udp://tracker.torrent.eu.org:451'],
+                                  [b'udp://tracker.coppersurfer.tk:6969']],
+            },
         }, {
             'name': 'odf',
             'parser': office.LibreOfficeParser,

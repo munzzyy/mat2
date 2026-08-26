@@ -19,7 +19,12 @@ class TorrentParser(abstract.AbstractParser):
     def get_meta(self) -> dict[str, str | dict]:
         metadata = {}
         for key, value in self.dict_repr.items():
-            if key not in self.allowlist:
+            # `announce`/`announce-list` are kept by `remove_all` since removing
+            # them would break the torrent, but they can embed a private-tracker
+            # passkey, so they must be reported rather than hidden. Only `info`
+            # is skipped: it's kept verbatim (any change alters the infohash)
+            # and holds the binary piece data.
+            if key != b'info':
                 metadata[key.decode('utf-8')] = value
         return metadata
 

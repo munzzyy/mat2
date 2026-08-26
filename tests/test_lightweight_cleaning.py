@@ -44,7 +44,11 @@ class TestLightWeightCleaning(unittest.TestCase):
                 'name': 'torrent',
                 'parser': torrent.TorrentParser,
                 'meta': {'created by': b'mktorrent 1.0'},
-                'expected_meta': {},
+                'expected_meta': {
+                    'announce': b'udp://tracker.torrent.eu.org:451',
+                    'announce-list': [[b'udp://tracker.torrent.eu.org:451'],
+                                      [b'udp://tracker.coppersurfer.tk:6969']],
+                },
             },{
                 'name': 'tiff',
                 'parser': images.TiffParser,
