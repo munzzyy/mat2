@@ -40,6 +40,13 @@ _ODF_OFFICE_NS = 'urn:oasis:names:tc:opendocument:xmlns:office:1.0'
 _ODF_TEXT_NS = 'urn:oasis:names:tc:opendocument:xmlns:text:1.0'
 _ODF_TABLE_NS = 'urn:oasis:names:tc:opendocument:xmlns:table:1.0'
 
+# The OOXML spec fixes these namespace URIs too, so we match elements by their
+# `{uri}local` tag rather than the document's `w`/`p`/`p14` prefixes, which are
+# only conventions.
+_OOXML_WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+_OOXML_PRESENTATION_NS = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+_OOXML_POWERPOINT_2010_NS = 'http://schemas.microsoft.com/office/powerpoint/2010/main'
+
 
 def _remove_element_keeping_tail(parent: ET.Element, element: ET.Element) -> None:
     """ Remove `element` from `parent`, grafting its tail text onto the previous
@@ -247,9 +254,7 @@ class MSOfficeParser(ZipParser):
             return False
 
         # rsid tags and attributes live in the wordprocessingml namespace.
-        # Match by URI, not by the `w` prefix, which is only a convention.
-        word_namespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-        if word_namespace not in namespace.values():
+        if _OOXML_WORD_NS not in namespace.values():
             return True
 
         parent_map = _build_parent_map(tree)
@@ -284,9 +289,7 @@ class MSOfficeParser(ZipParser):
             logging.error("Unable to parse %s: %s", full_path, e)
             return False
 
-        # Match by namespace URI, not by the document's `w` prefix, which is
-        # only a convention.
-        nsid_tag = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}nsid'
+        nsid_tag = '{%s}nsid' % _OOXML_WORD_NS
         elements_to_remove = [element for element in tree.iter()
                               if element.tag == nsid_tag]
         if not elements_to_remove:
@@ -307,7 +310,6 @@ class MSOfficeParser(ZipParser):
             logging.error("Unable to parse %s: %s", full_path, e)
             return False
 
-        word_namespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
         revision_names = {
             'del', 'ins', 'moveFrom', 'moveTo', 'moveFromRangeStart',
             'moveFromRangeEnd', 'moveToRangeStart', 'moveToRangeEnd',
@@ -320,7 +322,7 @@ class MSOfficeParser(ZipParser):
             'customXmlMoveFromRangeEnd', 'customXmlMoveToRangeStart',
             'customXmlMoveToRangeEnd'
         }
-        namespace_prefix = '{%s}' % word_namespace
+        namespace_prefix = '{%s}' % _OOXML_WORD_NS
 
         def _tag_local_name(tag: str) -> str:
             return tag.removeprefix(namespace_prefix)
@@ -390,9 +392,7 @@ class MSOfficeParser(ZipParser):
             logging.error("Unable to parse %s: %s", full_path, e)
             return False
 
-        # Match by namespace URI, not by the document's `w` prefix, which is
-        # only a convention.
-        namespace_prefix = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+        namespace_prefix = '{%s}' % _OOXML_WORD_NS
         comment_tags = {
             namespace_prefix + 'commentRangeStart',
             namespace_prefix + 'commentRangeEnd',
@@ -593,11 +593,13 @@ class MSOfficeParser(ZipParser):
             logging.error("Unable to parse %s: %s", full_path, e)
             return False
 
-        if 'p14' not in namespace:
+        if _OOXML_POWERPOINT_2010_NS not in namespace.values():
             return True  # pragma: no cover
 
-        for item in tree.iterfind('.//p14:creationId', namespace):
-            item.set('val', '%s' % random.randint(0, 2**32))
+        creation_id_tag = '{%s}creationId' % _OOXML_POWERPOINT_2010_NS
+        for item in tree.iter():
+            if item.tag == creation_id_tag:
+                item.set('val', '%s' % random.randint(0, 2**32))
         tree.write(full_path, xml_declaration=True, encoding='utf-8')
         return True
 
@@ -609,11 +611,13 @@ class MSOfficeParser(ZipParser):
             logging.error("Unable to parse %s: %s", full_path, e)
             return False
 
-        if 'p' not in namespace:
+        if _OOXML_PRESENTATION_NS not in namespace.values():
             return True  # pragma: no cover
 
-        for item in tree.iterfind('.//p:sldMasterId', namespace):
-            item.set('id', '%s' % random.randint(0, 2**32))
+        sld_master_id_tag = '{%s}sldMasterId' % _OOXML_PRESENTATION_NS
+        for item in tree.iter():
+            if item.tag == sld_master_id_tag:
+                item.set('id', '%s' % random.randint(0, 2**32))
         tree.write(full_path, xml_declaration=True, encoding='utf-8')
         return True
 
