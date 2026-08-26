@@ -38,11 +38,20 @@ class MutagenParser(abstract.AbstractParser):
             except mutagen.MutagenError as e:
                 raise ValueError(e)
 
+    @staticmethod
+    def _blank_vendor_string(f) -> None:
+        """ The Vorbis-comment vendor string (Ogg, FLAC) is a distinct field
+        from the comment list, so delete() leaves the encoder's build string
+        in place. """
+        if f.tags is not None and hasattr(f.tags, 'vendor'):
+            f.tags.vendor = ''
+
     def remove_all(self) -> bool:
         shutil.copy(self.filename, self.output_filename)
         try:
             f = mutagen.File(self.output_filename)
             f.delete()
+            self._blank_vendor_string(f)
             f.save()
             self._remove_appended_tags()
         except (mutagen.MutagenError, ValueError) as e:
@@ -82,6 +91,7 @@ class FLACParser(MutagenParser):
             f = mutagen.File(self.output_filename)
             f.clear_pictures()
             f.delete()
+            self._blank_vendor_string(f)
             f.save(deleteid3=True)
             self._remove_appended_tags()
         except (mutagen.MutagenError, ValueError) as e:

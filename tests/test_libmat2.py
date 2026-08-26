@@ -636,6 +636,23 @@ class TestAppendedTagsCleaning(unittest.TestCase):
                                         self.__append_id3v1, needles)
                 self.assertEqual(left, [])
 
+    def test_vendor_string(self):
+        for extension, parser in (('ogg', audio.OGGParser),
+                                  ('flac', audio.FLACParser)):
+            with self.subTest(extension=extension):
+                target = './tests/data/vendor.' + extension
+                shutil.copy('./tests/data/dirty.' + extension, target)
+
+                self.assertNotEqual(mutagen.File(target).tags.vendor, '')
+
+                p = parser(target)
+                self.assertTrue(p.remove_all())
+
+                self.assertEqual(mutagen.File(p.output_filename).tags.vendor, '')
+
+                os.remove(target)
+                os.remove(p.output_filename)
+
 
 class TestCleaning(unittest.TestCase):
     data = [{
