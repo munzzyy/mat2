@@ -1212,6 +1212,53 @@ class TextDocx(unittest.TestCase):
         os.remove('./tests/data/comment_clean.docx')
         os.remove('./tests/data/comment_clean.cleaned.docx')
 
+    def test_comment_anchors_removed_from_non_document_parts(self):
+        # Comment anchors can live in headers, footers, foot/endnotes too, not
+        # only in word/document.xml. Inject a kept footnotes part carrying
+        # anchors and make sure they get stripped there as well.
+        src = './tests/data/comment.docx'
+        work = './tests/data/comment_footnotes.docx'
+        footnotes = (
+            b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            b'<w:footnotes xmlns:w="http://schemas.openxmlformats.org/'
+            b'wordprocessingml/2006/main">'
+            b'<w:footnote w:id="1"><w:p>'
+            b'<w:commentRangeStart w:id="0"/>'
+            b'<w:r><w:t>footnote text</w:t></w:r>'
+            b'<w:commentRangeEnd w:id="0"/>'
+            b'<w:r><w:commentReference w:id="0"/></w:r>'
+            b'</w:p></w:footnote></w:footnotes>'
+        )
+        override = (
+            b'<Override PartName="/word/footnotes.xml" '
+            b'ContentType="application/vnd.openxmlformats-officedocument.'
+            b'wordprocessingml.footnotes+xml"/>'
+        )
+        with zipfile.ZipFile(src) as zin:
+            with zipfile.ZipFile(work, 'w') as zout:
+                for name in zin.namelist():
+                    data = zin.read(name)
+                    if name == '[Content_Types].xml':
+                        data = data.replace(b'</Types>', override + b'</Types>')
+                    zout.writestr(name, data)
+                zout.writestr('word/footnotes.xml', footnotes)
+
+        self.addCleanup(os.remove, work)
+        p = office.MSOfficeParser(work)
+        self.addCleanup(os.remove, p.output_filename)
+        self.assertTrue(p.remove_all())
+
+        with zipfile.ZipFile(p.output_filename) as zipin:
+            # the part must be kept, not merely dropped from the archive
+            self.assertIn('word/footnotes.xml', zipin.namelist())
+            content = zipin.read('word/footnotes.xml')
+
+        self.assertNotIn(b'commentReference', content)
+        self.assertNotIn(b'commentRangeStart', content)
+        self.assertNotIn(b'commentRangeEnd', content)
+        # the footnote text itself must survive
+        self.assertIn(b'footnote text', content)
+
     def test_xml_is_utf8(self):
         with zipfile.ZipFile('./tests/data/comment.docx') as zipin:
             c = zipin.open('word/document.xml')

@@ -55,6 +55,16 @@ def _remove_element_keeping_tail(parent: ET.Element, element: ET.Element) -> Non
     parent.remove(element)
 
 
+def _build_parent_map(tree) -> dict[ET.Element, ET.Element]:
+    """ Map every element to its parent. ElementTree elements don't know their
+    parent, so we build the lookup by walking each element's children. """
+    parent_map = {}
+    for parent in tree.iter():
+        for child in parent:
+            parent_map[child] = parent
+    return parent_map
+
+
 def _sort_xml_attributes(full_path: str) -> bool:
     """ Sort xml attributes lexicographically,
     because it's possible to fingerprint producers (MS Office, Libreoffice, …)
@@ -236,11 +246,13 @@ class MSOfficeParser(ZipParser):
             logging.error("Unable to parse %s: %s", full_path, e)
             return False
 
-        # rsid, tags or attributes, are always under the `w` namespace
-        if 'w' not in namespace:
+        # rsid tags and attributes live in the wordprocessingml namespace.
+        # Match by URI, not by the `w` prefix, which is only a convention.
+        word_namespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        if word_namespace not in namespace.values():
             return True
 
-        parent_map = {c:p for p in tree.iter() for c in p}
+        parent_map = _build_parent_map(tree)
 
         elements_to_remove = list()
         for item in tree.iterfind('.//', namespace):
@@ -267,20 +279,20 @@ class MSOfficeParser(ZipParser):
         See the spec for more details: https://docs.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.nsid?view=openxml-2.8.1
         """
         try:
-            tree, namespace = _parse_xml(full_path)
+            tree, _namespace = _parse_xml(full_path)
         except ET.ParseError as e:  # pragma: no cover
             logging.error("Unable to parse %s: %s", full_path, e)
             return False
 
-        # The nsid tag is always under the `w` namespace
-        if 'w' not in namespace:
+        # Match by namespace URI, not by the document's `w` prefix, which is
+        # only a convention.
+        nsid_tag = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}nsid'
+        elements_to_remove = [element for element in tree.iter()
+                              if element.tag == nsid_tag]
+        if not elements_to_remove:
             return True
 
-        parent_map = {c: p for p in tree.iter() for c in p}
-
-        elements_to_remove = list()
-        for element in tree.iterfind('.//w:nsid', namespace):
-            elements_to_remove.append(element)
+        parent_map = _build_parent_map(tree)
         for element in elements_to_remove:
             parent_map[element].remove(element)
 
@@ -299,8 +311,9 @@ class MSOfficeParser(ZipParser):
         revision_names = {
             'del', 'ins', 'moveFrom', 'moveTo', 'moveFromRangeStart',
             'moveFromRangeEnd', 'moveToRangeStart', 'moveToRangeEnd',
-            'cellIns', 'cellDel', 'rPrChange', 'pPrChange', 'sectPrChange',
-            'tblPrChange', 'trPrChange', 'tcPrChange', 'tblGridChange',
+            'cellIns', 'cellDel', 'cellMerge', 'rPrChange', 'pPrChange',
+            'sectPrChange', 'tblPrChange', 'trPrChange', 'tcPrChange',
+            'tblGridChange',
             'numberingChange', 'customXmlInsRangeStart',
             'customXmlInsRangeEnd', 'customXmlDelRangeStart',
             'customXmlDelRangeEnd', 'customXmlMoveFromRangeStart',
@@ -318,15 +331,16 @@ class MSOfficeParser(ZipParser):
         if not elements:
             return True  # No revisions are present
 
-        parent_map = {c:p for p in tree.iter() for c in p}
+        parent_map = _build_parent_map(tree)
 
         elements_del = [element for element in elements if
                         _tag_local_name(element.tag) in {
                             'del', 'moveFrom', 'moveFromRangeStart',
                             'moveFromRangeEnd', 'moveToRangeStart',
-                            'moveToRangeEnd', 'cellDel', 'rPrChange',
-                            'pPrChange', 'sectPrChange', 'tblPrChange',
-                            'trPrChange', 'tcPrChange', 'tblGridChange',
+                            'moveToRangeEnd', 'cellDel', 'cellMerge',
+                            'rPrChange', 'pPrChange', 'sectPrChange',
+                            'tblPrChange', 'trPrChange', 'tcPrChange',
+                            'tblGridChange',
                             'numberingChange', 'customXmlInsRangeStart',
                             'customXmlInsRangeEnd', 'customXmlDelRangeStart',
                             'customXmlDelRangeEnd',
@@ -369,32 +383,28 @@ class MSOfficeParser(ZipParser):
         return True
 
     @staticmethod
-    def __remove_document_comment_meta(full_path: str) -> bool:
+    def __remove_comment_meta(full_path: str) -> bool:
         try:
-            tree, namespace = _parse_xml(full_path)
+            tree, _namespace = _parse_xml(full_path)
         except ET.ParseError as e:  # pragma: no cover
             logging.error("Unable to parse %s: %s", full_path, e)
             return False
 
-        # search the docs to see if we can bail early
-        range_start = tree.find('.//w:commentRangeStart', namespace)
-        range_end = tree.find('.//w:commentRangeEnd', namespace)
-        references = tree.find('.//w:commentReference', namespace)
-        if range_start is None and range_end is None and references is None:
+        # Match by namespace URI, not by the document's `w` prefix, which is
+        # only a convention.
+        namespace_prefix = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+        comment_tags = {
+            namespace_prefix + 'commentRangeStart',
+            namespace_prefix + 'commentRangeEnd',
+            namespace_prefix + 'commentReference',
+        }
+
+        elements_del = [element for element in tree.iter()
+                        if element.tag in comment_tags]
+        if not elements_del:
             return True  # No comment meta tags are present
 
-        parent_map = {c:p for p in tree.iter() for c in p}
-
-        # iterate over the elements and add them to list
-        elements_del = list()
-        for element in tree.iterfind('.//w:commentRangeStart', namespace):
-            elements_del.append(element)
-        for element in tree.iterfind('.//w:commentRangeEnd', namespace):
-            elements_del.append(element)
-        for element in tree.iterfind('.//w:commentReference', namespace):
-            elements_del.append(element)
-
-        # remove the elements
+        parent_map = _build_parent_map(tree)
         for element in elements_del:
             parent_map[element].remove(element)
 
@@ -631,13 +641,12 @@ class MSOfficeParser(ZipParser):
             if self.__remove_content_type_members(full_path) is False:  # pragma: no cover
                 return False
         elif member_name.startswith('word/') and member_name.endswith('.xml'):
-            # Revisions can occur in the document, notes, headers and footers.
+            # Revisions and comment anchors can occur in the document, notes,
+            # headers and footers.
             if self.__remove_revisions(full_path) is False:
                 return False  # pragma: no cover
-            if full_path.endswith('/word/document.xml'):
-                # remove comment references and ranges
-                if self.__remove_document_comment_meta(full_path) is False:
-                    return False  # pragma: no cover
+            if self.__remove_comment_meta(full_path) is False:
+                return False  # pragma: no cover
         elif member_name.endswith('.rels'):
             # similar to the above, but for the relationship files
             if self.__remove_rels_members(full_path, member_name) is False:  # pragma: no cover
@@ -759,7 +768,7 @@ class LibreOfficeParser(ZipParser):
             return False
 
         root = tree.getroot()
-        parent_map = {c: p for p in root.iter() for c in p}
+        parent_map = _build_parent_map(root)
 
         # Tracked changes live under `office:text` (text documents) as
         # `text:tracked-changes` and under `office:spreadsheet` as
@@ -795,7 +804,7 @@ class LibreOfficeParser(ZipParser):
             return False
 
         root = tree.getroot()
-        parent_map = {c: p for p in root.iter() for c in p}
+        parent_map = _build_parent_map(root)
 
         # Comments are stored inline as an `office:annotation` (holding the
         # author, date, initials and the comment body) paired with an
